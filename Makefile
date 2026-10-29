@@ -2,7 +2,7 @@
 
 APP := SSH Key Maker.app
 
-.PHONY: all help build install icons run clean
+.PHONY: all help build install icons run start clean
 
 all: build
 
@@ -21,6 +21,9 @@ icons: ## лише перегенерувати іконки (icons/)
 
 run: build ## зібрати й запустити
 	open "$(APP)"
+
+start: ## Electron-версія: за згодою встановити Node.js та Electron і запустити
+	./start.sh
 
 clean: ## прибрати зібране (.app та icons/)
 	rm -rf "$(APP)" icons

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>SSH Key Maker</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --panel: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --border: #d2d2d7;
+    --accent: #5b4bdb; --accent-text: #fff; --seg: #e3e3e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1e20; --panel: #2a2a2d; --text: #f2f2f7; --muted: #9a9aa0; --border: #3d3d42;
+      --accent: #7b6cf0; --seg: #333337;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px -apple-system, "Segoe UI", system-ui, Ubuntu, sans-serif;
+    display: flex; flex-direction: column; gap: 14px; padding: 20px;
+  }
+  fieldset { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; align-items: center; }
+  fieldset:disabled { opacity: .6; }
+  label { text-align: right; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel); color: var(--text); font: inherit;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .seg { display: flex; background: var(--seg); border-radius: 7px; padding: 2px; }
+  .seg input { display: none; }
+  .seg label { flex: 1; text-align: center; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+  .seg input:checked + label { background: var(--panel); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .hidden { display: none !important; }
+  .where { font-size: 11px; color: var(--muted); user-select: text; word-break: break-all; }
+  .action { display: flex; align-items: center; gap: 12px; }
+  button {
+    font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--panel); color: var(--text); cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); min-width: 140px; padding: 8px 16px; font-size: 14px; }
+  .lamp { width: 18px; height: 18px; border-radius: 50%; background: #8e8e93; transition: background .2s, box-shadow .2s; }
+  .lamp.working { background: #ffcc00; box-shadow: 0 0 8px #ffcc00cc; }
+  .lamp.ok { background: #34c759; box-shadow: 0 0 8px #34c759cc; }
+  .lamp.fail { background: #ff3b30; box-shadow: 0 0 8px #ff3b30cc; }
+  .state { font-weight: 600; font-size: 14px; }
+  .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--text); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .head { display: flex; align-items: center; gap: 8px; }
+  .head h2 { flex: 1; margin: 0; font-size: 14px; }
+  pre {
+    margin: 0; padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    font: 11px ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-all;
+    user-select: text; overflow: auto;
+  }
+  #pubkey { height: 60px; }
+  #log { flex: 1; min-height: 160px; }
+</style>
+</head>
+<body>
+  <form id="form">
+    <fieldset id="fields">
+      <label>Режим:</label>
+      <div class="seg">
+        <input type="radio" name="mode" id="m-files" value="files"><label for="m-files">Лише ключі (keys)</label>
+        <input type="radio" name="mode" id="m-ssh" value="sshDir"><label for="m-ssh">Ключі в ~/.ssh</label>
+        <input type="radio" name="mode" id="m-full" value="full" checked><label for="m-full">Повне налаштування</label>
+      </div>
+
+      <label for="name" id="name-label">Назва (Host у конфігу):</label>
+      <input type="text" id="name" placeholder="erp" autofocus spellcheck="false">
+
+      <label for="host" class="full">Хост:</label>
+      <input type="text" id="host" class="full" placeholder="176.103.114.151" spellcheck="false">
+
+      <label for="port" class="full">Порт:</label>
+      <input type="text" id="port" class="full" value="22">
+
+      <label for="user" class="full">Користувач:</label>
+      <input type="text" id="user" class="full" placeholder="root" spellcheck="false">
+
+      <label for="serverPassword" class="full">Пароль сервера:</label>
+      <input type="password" id="serverPassword" class="full" placeholder="для заливання ключа">
+
+      <label for="passphrase">Пароль ключа:</label>
+      <input type="password" id="passphrase" placeholder="необов'язково">
+
+      <label>Куди:</label>
+      <div class="where" id="where"></div>
+    </fieldset>
+
+    <div class="action" style="margin-top:14px">
+      <button type="submit" class="primary" id="go">Згенерувати</button>
+      <div class="lamp" id="lamp"></div>
+      <span class="state" id="state">Очікує</span>
+      <div class="spinner hidden" id="spinner"></div>
+    </div>
+  </form>
+
+  <div class="head">
+    <h2>Публічний ключ</h2>
+    <button id="reveal" disabled>Показати в теці</button>
+    <button id="copy" disabled>Копіювати</button>
+  </div>
+  <pre id="pubkey">—</pre>
+
+  <div class="head"><h2>Журнал</h2></div>
+  <pre id="log"></pre>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

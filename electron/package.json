@@ -1,0 +1,14 @@
+{
+  "name": "ssh-key-maker",
+  "productName": "SSH Key Maker",
+  "version": "1.0.0",
+  "description": "Створення SSH-ключів і налаштування входу на сервер",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "44.4.2"
+  }
+}
