@@ -101,6 +101,32 @@ fi
 echo "✓ Electron $(node -p "require('electron/package.json').version")"
 check_linux_libs || { echo "✗ Без цих бібліотек Electron не запуститься."; exit 1; }
 
-# 3. Запуск
+# 3. Linux: ярлики з іконкою — у меню застосунків і в теці проєкту. Ведуть на launcher.sh,
+#    тож далі програма запускається клацанням, без терміналу. У macOS є «SSH Key Maker.app»
+desktop_shortcuts() {
+  [ "$(uname -s)" = Linux ] || return 0
+  root="$(cd .. && pwd)"
+  menu="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+  mkdir -p "$menu"
+  for f in "$menu/ssh-key-maker.desktop" "$root/SSH Key Maker.desktop"; do
+    cat > "$f" <<EOF
+[Desktop Entry]
+Type=Application
+Name=SSH Key Maker
+Comment=Створення SSH-ключів і налаштування входу на сервер
+Exec="$root/launcher.sh"
+Icon=$root/icons/hicolor/256x256/apps/ssh-key-maker.png
+Terminal=false
+Categories=Utility;Network;
+EOF
+    chmod +x "$f"
+  done
+  # GNOME запускає .desktop з теки лише після «Дозволити запуск» — позначаємо довіреним одразу
+  command -v gio >/dev/null 2>&1 && gio set "$root/SSH Key Maker.desktop" metadata::trusted true 2>/dev/null || true
+  echo "✓ Ярлики: меню застосунків і «SSH Key Maker.desktop» у теці проєкту"
+}
+desktop_shortcuts || echo "⚠︎ Не вдалося створити ярлики — запускайте ./start.sh"
+
+# 4. Запуск
 echo "→ Запускаю SSH Key Maker…"
 exec npm start --silent

@@ -55,6 +55,25 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "✓ Electron $(node -p "require('electron/package.json').version")"
 
-# 3. Запуск
+# 3. Ярлики з іконкою — у теці проєкту та в меню «Пуск». Ведуть на launcher.vbs,
+#    тож далі програма запускається клацанням, без вікна консолі
+try {
+    $wsh = New-Object -ComObject WScript.Shell
+    $root = $PSScriptRoot
+    foreach ($dir in @($root, [Environment]::GetFolderPath('Programs'))) {
+        $lnk = $wsh.CreateShortcut((Join-Path $dir 'SSH Key Maker.lnk'))
+        $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+        $lnk.Arguments = '"' + (Join-Path $root 'launcher.vbs') + '"'
+        $lnk.WorkingDirectory = $root
+        $lnk.IconLocation = (Join-Path $root 'icons\icon.ico') + ',0'
+        $lnk.Description = 'Створення SSH-ключів і налаштування входу на сервер'
+        $lnk.Save()
+    }
+    Write-Host '✓ Ярлики: «SSH Key Maker» у теці проєкту та в меню «Пуск»'
+} catch {
+    Write-Host "⚠︎ Не вдалося створити ярлики: $($_.Exception.Message)"
+}
+
+# 4. Запуск
 Write-Host '→ Запускаю SSH Key Maker…'
 & npm start --silent

@@ -3,7 +3,8 @@
 #   icons/icon.ico                                  — Windows (16…256, PNG усередині)
 #   icons/hicolor/<N>x<N>/apps/ssh-key-maker.png    — Linux (тема hicolor); 512 — вікно Electron
 #   icons/ssh-key-maker.desktop                     — Linux, ярлик меню
-# Потрібні sips (є в macOS) і python3.
+#   SSH Key Maker.app/Contents/Resources/AppIcon.icns — macOS
+# Потрібні sips та iconutil (є в macOS) і python3.
 set -e
 cd "$(dirname "$0")"
 OUT=icons
@@ -48,5 +49,15 @@ Icon=ssh-key-maker
 Terminal=false
 Categories=Utility;Network;
 EOF
+
+# macOS: ICNS для «SSH Key Maker.app»
+SET="$TMP/AppIcon.iconset"
+mkdir -p "$SET"
+for s in 16 32 128 256 512; do
+  png $s "$SET/icon_${s}x${s}.png"
+  png $((s * 2)) "$SET/icon_${s}x${s}@2x.png"
+done
+iconutil -c icns "$SET" -o "SSH Key Maker.app/Contents/Resources/AppIcon.icns"
+touch "SSH Key Maker.app"  # щоб Finder перечитав іконку
 
 echo "Іконки: $(pwd)/$OUT"

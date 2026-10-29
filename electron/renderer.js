@@ -73,12 +73,17 @@ $('form').addEventListener('submit', async e => {
 
 $('copy').addEventListener('click', () => api.copy(publicKey))
 $('reveal').addEventListener('click', () => keyPath && api.reveal(keyPath))
+$('repo').addEventListener('click', e => {
+  e.preventDefault()
+  api.openRepo()
+})
 
 api.onLog(append)
 api.onKey(({ key, keyPath }) => showKey(key, keyPath))
 
 api.paths().then(p => {
   paths = p
+  $('repo').title = p.repoUrl
   updateMode()
 })
 updateMode()

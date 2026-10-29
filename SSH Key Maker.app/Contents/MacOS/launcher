@@ -1,0 +1,11 @@
+#!/bin/sh
+# macOS: те саме, що launcher.sh, але вбудоване в застосунок. Скрипт з теки проєкту .app виконати
+# не може — macOS (TCC) не дає йому читати файли в «Робочому столі», «Документах» тощо.
+# Electron уже встановлено → відкриває вікно. Ні → Термінал зі start.sh, який за згодою все встановить.
+ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+ELECTRON="$ROOT/electron/node_modules/electron/dist/Electron.app"
+# -n: новий екземпляр, навіть якщо вже відкрито інший застосунок на Electron
+[ -d "$ELECTRON" ] && exec open -n -a "$ELECTRON" --args "$ROOT/electron"
+open -a Terminal "$ROOT/start.sh" && exit 0
+osascript -e 'display alert "SSH Key Maker" message "Не знайдено start.sh. «SSH Key Maker.app» має лежати в теці проєкту — у Dock його можна перетягнути звідти."' >/dev/null
+exit 1

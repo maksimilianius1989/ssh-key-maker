@@ -15,6 +15,7 @@ const SSH_DIR = path.join(os.homedir(), '.ssh')
 const PROJECT_DIR = process.env.SSHKM_PROJECT_DIR || path.resolve(__dirname, '..')
 const PROJECT_KEYS_DIR = path.join(PROJECT_DIR, 'keys')
 const ICON = path.join(PROJECT_DIR, 'icons', 'hicolor', '512x512', 'apps', 'ssh-key-maker.png')
+const REPO_URL = 'https://github.com/maksimilianius1989/ssh-key-maker'
 
 let win
 
@@ -353,22 +354,24 @@ async function generate(f, say, showKey) {
 
 // MARK: - Вікно
 
-ipcMain.handle('paths', () => ({ sshDir: SSH_DIR, keysDir: PROJECT_KEYS_DIR, platform: process.platform }))
+ipcMain.handle('paths', () => ({ sshDir: SSH_DIR, keysDir: PROJECT_KEYS_DIR, platform: process.platform, repoUrl: REPO_URL }))
 ipcMain.handle('generate', (e, form) =>
   generate(form,
     line => e.sender.send('log', line),
     (key, keyPath) => e.sender.send('key', { key, keyPath })))
 ipcMain.handle('reveal', (_e, p) => shell.showItemInFolder(p))
 ipcMain.handle('copy', (_e, text) => clipboard.writeText(text))
+// Лише адреса репозиторію з головного процесу — довільних URL вікно відкрити не може
+ipcMain.handle('openRepo', () => shell.openExternal(REPO_URL))
 
 app.whenReady().then(() => {
   if (IS_MAC && fs.existsSync(ICON)) app.dock.setIcon(ICON)
   win = new BrowserWindow({
     title: 'SSH Key Maker',
     width: 620,
-    height: 720,
+    height: 780,
     minWidth: 560,
-    minHeight: 620,
+    minHeight: 720,
     icon: fs.existsSync(ICON) ? ICON : undefined,
     autoHideMenuBar: true,
     webPreferences: {
@@ -378,6 +381,9 @@ app.whenReady().then(() => {
       sandbox: true,
     },
   })
+  // Вікно нікуди не переходить і нових вікон не відкриває — посилання йдуть у системний браузер
+  win.webContents.on('will-navigate', e => e.preventDefault())
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.loadFile(path.join(__dirname, 'index.html'))
 })
 

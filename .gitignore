@@ -1,0 +1,4 @@
+.DS_Store
+# Ярлики, які створюють start.sh (Linux) і start.ps1 (Windows) — з абсолютними шляхами
+/SSH Key Maker.desktop
+/SSH Key Maker.lnk

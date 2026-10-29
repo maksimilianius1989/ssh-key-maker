@@ -21,17 +21,25 @@
 | `electron/` | Код програми (див. розділ «Electron-версія»): `main.js`, `preload.js`, `index.html`, `renderer.js`, `package.json`, `.gitignore` (`node_modules/`) |
 | `start.sh` | macOS/Linux: за згодою (`[т/Н]`, `-y` — без питань) ставить Node.js ≥ 22 (brew / nvm), `npm install` Electron, на Linux — бракуючі бібліотеки Electron, і запускає `npm start` |
 | `start.cmd`, `start.ps1` | Те саме для Windows (Node.js через `winget`). `start.ps1` — UTF-8 з BOM, інакше Windows PowerShell 5.1 псує кирилицю |
+| `SSH Key Maker.app` | macOS: запуск клацанням. `Contents/MacOS/launcher` — shell-скрипт: є `electron/node_modules/electron/dist/Electron.app` → `open -n -a <він> --args <тека>/electron`, немає → `open -a Terminal start.sh`. Логіка вбудована, бо скрипт з теки проєкту .app виконати не може (TCC не пускає в «Робочий стіл», «Документи»). `LSUIElement` — без своєї іконки в Dock. Має лежати в теці проєкту |
+| `launcher.sh` | Linux: те саме для ярлика `.desktop` — `dist/electron <тека>/electron`, інакше термінал (`x-terminal-emulator`, `gnome-terminal`, `konsole`, `xfce4-terminal`, `xterm`) зі `start.sh`, який після помилки чекає Enter |
+| `launcher.vbs` | Windows: те саме для ярлика `.lnk` — `dist\electron.exe` без вікна консолі, інакше `start.cmd`. ASCII, CRLF |
+| `.gitignore`, `.gitattributes` | Не комітити згенеровані ярлики (`SSH Key Maker.lnk`, `SSH Key Maker.desktop`) і `.DS_Store`; `*.cmd`, `*.vbs` — з CRLF |
 | `keys/` | Створюється програмою в режимі «Лише ключі». Містить `.gitignore` з `*` |
 | `Makefile` | Обгортка: `make` / `make start` (= `./start.sh`), `make help`, `make icons`, `make clean` (видаляє `electron/node_modules`) |
-| `make-icons.sh` | З `icon.png` робить `icons/`: `icon.ico` 16–256 (Windows), `hicolor/<N>x<N>/apps/ssh-key-maker.png` (Linux; 512 — іконка вікна Electron) і `ssh-key-maker.desktop` (Linux). Потрібні `sips` (macOS) і `python3`. Запуск: `make icons` |
+| `make-icons.sh` | З `icon.png` робить `icons/`: `icon.ico` 16–256 (Windows), `hicolor/<N>x<N>/apps/ssh-key-maker.png` (Linux; 512 — іконка вікна Electron) і `ssh-key-maker.desktop` (Linux), а ще `SSH Key Maker.app/Contents/Resources/AppIcon.icns` (macOS, 16–1024). Потрібні `sips`, `iconutil` (macOS) і `python3`. Запуск: `make icons` |
 | `icons/` | Згенеровані іконки — не правити вручну, міняти `icon.png` і запускати `make icons` |
 | `icon.png` | Іконка застосунку, квадрат 1254×1254 (ключ + термінал + «SSH», фіолетово-синій градієнт на темному) |
 | `README.md` | Інструкція для людини |
 | `AGENTS.md` | Ця специфікація |
 
-## Інтерфейс (одне вікно, мін. ~560×620)
+## Інтерфейс (одне вікно, мін. ~560×720)
 
 Згори вниз:
+
+- **Шапка:** іконка застосунку (`icons/hicolor/128x128/…`, 44 px, заокруглена), назва «SSH Key Maker»
+  і підзаголовок «Створення SSH-ключів і налаштування входу на сервер», праворуч — посилання
+  «GitHub ↗» на https://github.com/maksimilianius1989/ssh-key-maker (відкривається в системному браузері).
 
 0. **Режим** (сегментований перемикач, типово «Повне налаштування»):
    | Режим | Куди ключ | Конфіг | Сервер | Поля |
@@ -153,14 +161,15 @@
 | Файл | Що робить |
 |---|---|
 | `main.js` | Головний процес: уся логіка «Алгоритму» й «Платформ» (пошук і встановлення OpenSSH, генерація, конфіг, askpass, заливання, тест). Команди — `child_process.spawn`, асинхронно; stdin — `ignore`, крім заливання у Windows |
-| `preload.js` | `contextBridge` → `window.sshkm`: `paths()`, `generate(form)`, `reveal(path)`, `copy(text)`, `onLog(fn)`, `onKey(fn)` |
-| `index.html` | Вікно 620×720 (мін. 560×620), світла й темна тема за системою, CSP без зовнішніх ресурсів |
+| `preload.js` | `contextBridge` → `window.sshkm`: `paths()`, `generate(form)`, `reveal(path)`, `copy(text)`, `openRepo()`, `onLog(fn)`, `onKey(fn)` |
+| `index.html` | Вікно 620×780 (мін. 560×720), світла й темна тема за системою, CSP без зовнішніх ресурсів |
 | `renderer.js` | Стан форми, лампочка, блокування під час роботи, очищення пароля сервера наприкінці |
 | `package.json` | `npm start` = `electron .`; Electron зафіксовано точною версією в `devDependencies` |
 
 IPC: `generate` повертає `true`/`false` (зелена/червона лампочка), рядки журналу йдуть подією `log`,
 готовий ключ — подією `key` `{key, keyPath}`. Валідація — у головному процесі.
-Безпека вікна: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`.
+Безпека вікна: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; вікно нікуди не переходить
+і не відкриває нових вікон, а `openRepo` відкриває лише адресу репозиторію, задану в головному процесі.
 Іконка — `icons/hicolor/512x512/apps/ssh-key-maker.png` (у macOS — ще й у Dock).
 
 ### Скрипти запуску
@@ -177,7 +186,14 @@ IPC: `generate` повертає `true`/`false` (зелена/червона л�
    питає й робить `npm install` у `electron/`.
 3. **Лише Linux:** `ldd` бінарника Electron; бракує бібліотек → питає й ставить через
    `sudo apt-get` / `dnf` / `pacman` (NSS, GTK3, GBM, ALSA, XScrnSaver, xshmfence, DRM).
-4. `npm start`.
+4. **Ярлики з іконкою** (повторний запуск їх оновлює; невдача — лише `⚠︎`):
+   Windows — `SSH Key Maker.lnk` у теці проєкту й у меню «Пуск» (`wscript.exe "<тека>\launcher.vbs"`,
+   іконка `icons\icon.ico`); Linux — `ssh-key-maker.desktop` у `~/.local/share/applications` і
+   `SSH Key Maker.desktop` у теці проєкту (`Exec="<тека>/launcher.sh"`, абсолютний шлях до іконки,
+   `gio set … metadata::trusted true`). macOS — нічого: `SSH Key Maker.app` уже в репозиторії.
+5. `npm start`.
+
+`start.cmd` після невдачі робить `pause`, щоб при запуску подвійним клацанням вікно не зникло.
 
 Відповідь `т`/`y` (будь-який регістр) — так, решта — ні. Відмова на будь-якому кроці → `✗` і вихід
 з кодом 1. `start.ps1` — UTF-8 **з BOM** (інакше Windows PowerShell 5.1 псує кирилицю);

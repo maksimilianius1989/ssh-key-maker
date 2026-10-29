@@ -50,6 +50,13 @@
   .state { font-weight: 600; font-size: 14px; }
   .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--text); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand img { width: 44px; height: 44px; border-radius: 10px; }
+  .brand h1 { margin: 0; font-size: 18px; }
+  .brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+  .brand > div { flex: 1; }
+  .brand a { color: var(--accent); font-size: 12px; text-decoration: none; white-space: nowrap; }
+  .brand a:hover { text-decoration: underline; }
   .head { display: flex; align-items: center; gap: 8px; }
   .head h2 { flex: 1; margin: 0; font-size: 14px; }
   pre {
@@ -58,10 +65,19 @@
     user-select: text; overflow: auto;
   }
   #pubkey { height: 60px; }
-  #log { flex: 1; min-height: 160px; }
+  #log { flex: 1; min-height: 130px; }
 </style>
 </head>
 <body>
+  <header class="brand">
+    <img src="../icons/hicolor/128x128/apps/ssh-key-maker.png" alt="">
+    <div>
+      <h1>SSH Key Maker</h1>
+      <p>Створення SSH-ключів і налаштування входу на сервер</p>
+    </div>
+    <a href="#" id="repo">GitHub ↗</a>
+  </header>
+
   <form id="form">
     <fieldset id="fields">
       <label>Режим:</label>
