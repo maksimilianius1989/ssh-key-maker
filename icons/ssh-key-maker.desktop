@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SSH Key Maker
+Comment=Створення SSH-ключів і налаштування входу на сервер
+Exec=ssh-key-maker
+Icon=ssh-key-maker
+Terminal=false
+Categories=Utility;Network;
