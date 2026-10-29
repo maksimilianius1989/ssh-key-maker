@@ -1,11 +1,7 @@
 # SSH Key Maker
 
-Програма, яка за один клік створює SSH-ключі. Є дві версії з однаковим вікном і логікою:
-
-| Версія | ОС | Як запустити |
-|---|---|---|
-| **SwiftUI** (`SSH Key Maker.app`) | macOS 13+ | Відкрити `.app` |
-| **Electron** (`electron/`) | macOS, Windows 10/11, Linux | `./start.sh` або `start.cmd` — сам поставить, чого бракує |
+Програма, яка за один клік створює SSH-ключі. Працює в macOS, Windows 10/11 і Linux
+(Electron, тека `electron/`).
 
 Три режими (перемикач угорі вікна):
 
@@ -28,15 +24,6 @@
 ---
 
 ## Встановлення
-
-### macOS — готовий застосунок
-
-1. Відкрийте теку `ssh-key-maker` у Finder.
-2. Перетягніть **SSH Key Maker.app** у «Програми» (можна запускати й прямо з теки).
-3. Перший запуск: якщо macOS каже «неможливо перевірити розробника» — клацніть
-   правою кнопкою → **Відкрити** → **Відкрити**. Далі запускається звичайно.
-
-### Будь-яка ОС — Electron-версія
 
 | ОС | Команда (з теки проєкту) |
 |---|---|
@@ -164,27 +151,21 @@ Host erp
 ## Для розробника
 
 ```bash
-make          # зібрати SSH Key Maker.app (SwiftUI)
-make install  # зібрати й встановити в «Програми»
-make run      # зібрати й запустити
-make start    # Electron-версія: за згодою поставити Node.js та Electron і запустити
-make icons    # лише перегенерувати іконки
-make clean    # прибрати зібране
+make          # те саме, що make start
+make start    # за згодою поставити Node.js та Electron і запустити
+make icons    # перегенерувати іконки з icon.png
+make clean    # прибрати встановлений Electron (electron/node_modules)
 make help     # список команд
 ```
 
-`make` збирає `SSH Key Maker.app` з `SSHKeyMaker.swift` та іконки `icon.png`. Потрібні
-інструменти командного рядка Xcode (`xcode-select --install`).
-
-Electron-версія лежить у `electron/`: `main.js` — уся логіка, `index.html` + `renderer.js` — вікно.
+Код лежить у `electron/`: `main.js` — уся логіка, `index.html` + `renderer.js` — вікно.
 Без скрипта її можна запустити так: `cd electron && npm install && npm start`.
 
-Щоб змінити іконку — замініть `icon.png` (квадрат) і перезапустіть збірку. Іконки для всіх
-платформ лягають у `icons/` (Electron бере `icons/hicolor/512x512/…`):
+Щоб змінити іконку — замініть `icon.png` (квадрат) і виконайте `make icons` (потрібна macOS:
+`sips`). Іконки лягають у `icons/` (вікно Electron бере `icons/hicolor/512x512/…`):
 
 | Платформа | Файл |
 |---|---|
-| macOS | `icons/AppIcon.icns` |
 | Windows | `icons/icon.ico` |
 | Linux | `icons/hicolor/<розмір>/apps/ssh-key-maker.png` + `icons/ssh-key-maker.desktop` |
 

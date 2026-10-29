@@ -1,13 +1,13 @@
 # SSH Key Maker — специфікація для AI-агента
 
 Цей документ — **джерело правди** про програму. За ним агент має змогу відтворити її на будь-якій
-ОС (macOS, Windows, Linux) і будь-якою мовою чи фреймворком. Реалізації: macOS / SwiftUI
-(`SSHKeyMaker.swift`) і кросплатформна Electron (`electron/`). Інструкція для людини — `README.md`.
+ОС (macOS, Windows, Linux) і будь-якою мовою чи фреймворком. Реалізація — кросплатформна,
+на Electron (`electron/`). Інструкція для людини — `README.md`.
 
 ## Тип програми
 
-- **Десктопний GUI-застосунок на одне вікно** (не веб-сервіс, не CLI). Нативний (SwiftUI) або
-  Electron — інтерфейс і поведінка однакові.
+- **Десктопний GUI-застосунок на одне вікно** (не веб-сервіс, не CLI). Реалізовано на Electron;
+  нативна реалізація має повторювати той самий інтерфейс і поведінку.
 - Офлайн-утиліта для одного користувача. Працює з правами поточного користувача, без адмінських прав.
 - Не зберігає налаштувань і секретів. Стан живе лише, поки відкрите вікно.
 - Сама нічого не шифрує. Уся криптографія та мережа — через стандартні команди **OpenSSH**,
@@ -18,22 +18,16 @@
 
 | Файл | Призначення |
 |---|---|
-| `SSHKeyMaker.swift` | Увесь код macOS-версії (SwiftUI, один файл) |
-| `SSH Key Maker.app` | Зібрана macOS-версія (результат `build.sh`, лежить у репозиторії) |
-| `build.sh` | Збирає `SSH Key Maker.app` (`--install` — ще й копіює в `/Applications` або `~/Applications`): `swiftc -parse-as-library`, іконка з `icons/AppIcon.icns`, `Info.plist` (з ключем `SSHKMProjectDir` = тека проєкту), ad-hoc підпис |
-| `electron/` | Кросплатформна версія (див. розділ «Electron-версія»): `main.js`, `preload.js`, `index.html`, `renderer.js`, `package.json`, `.gitignore` (`node_modules/`) |
+| `electron/` | Код програми (див. розділ «Electron-версія»): `main.js`, `preload.js`, `index.html`, `renderer.js`, `package.json`, `.gitignore` (`node_modules/`) |
 | `start.sh` | macOS/Linux: за згодою (`[т/Н]`, `-y` — без питань) ставить Node.js ≥ 22 (brew / nvm), `npm install` Electron, на Linux — бракуючі бібліотеки Electron, і запускає `npm start` |
 | `start.cmd`, `start.ps1` | Те саме для Windows (Node.js через `winget`). `start.ps1` — UTF-8 з BOM, інакше Windows PowerShell 5.1 псує кирилицю |
 | `keys/` | Створюється програмою в режимі «Лише ключі». Містить `.gitignore` з `*` |
-| `Makefile` | Обгортка: `make` (збірка), `make help`, `make install`, `make run`, `make start` (= `./start.sh`), `make icons`, `make clean` |
-| `make-icons.sh` | З `icon.png` робить `icons/`: `AppIcon.icns` (macOS), `icon.ico` 16–256 (Windows), `hicolor/<N>x<N>/apps/ssh-key-maker.png` і `ssh-key-maker.desktop` (Linux). Потрібні `sips`, `iconutil`, `python3`. Викликається з `build.sh` |
-| `icons/` | Згенеровані іконки — не правити вручну, міняти `icon.png` і перезапускати |
+| `Makefile` | Обгортка: `make` / `make start` (= `./start.sh`), `make help`, `make icons`, `make clean` (видаляє `electron/node_modules`) |
+| `make-icons.sh` | З `icon.png` робить `icons/`: `icon.ico` 16–256 (Windows), `hicolor/<N>x<N>/apps/ssh-key-maker.png` (Linux; 512 — іконка вікна Electron) і `ssh-key-maker.desktop` (Linux). Потрібні `sips` (macOS) і `python3`. Запуск: `make icons` |
+| `icons/` | Згенеровані іконки — не правити вручну, міняти `icon.png` і запускати `make icons` |
 | `icon.png` | Іконка застосунку, квадрат 1254×1254 (ключ + термінал + «SSH», фіолетово-синій градієнт на темному) |
 | `README.md` | Інструкція для людини |
 | `AGENTS.md` | Ця специфікація |
-
-Помилка SourceKit «'main' attribute cannot be used…» у редакторі — хибна: редактор не знає про
-`-parse-as-library`. Збірка проходить.
 
 ## Інтерфейс (одне вікно, мін. ~560×620)
 
@@ -46,9 +40,7 @@
    | Ключі в ~/.ssh | `~/.ssh/` | ні | ні | Назва, Пароль ключа |
    | Повне налаштування | `~/.ssh/` | так | так | усі |
 
-   Тека проєкту: у SwiftUI — значення `SSHKMProjectDir` з `Info.plist` (його пише `build.sh`), бо
-   `.app` можуть перенести в «Програми», де писати не можна; немає ключа — тека, де лежить `.app`.
-   В Electron — змінна оточення `SSHKM_PROJECT_DIR`, інакше батьківська тека `electron/`.
+   Тека проєкту — змінна оточення `SSHKM_PROJECT_DIR`, інакше батьківська тека `electron/`.
    Під формою — рядок «Куди:» зі шляхом.
 1. **Форма** (у ключових режимах видно лише Назву й Пароль ключа)
    | Поле | Тип | Перевірка |
@@ -145,8 +137,8 @@
 
 | | macOS | Linux | Windows 10/11 |
 |---|---|---|---|
-| Реалізовано | SwiftUI (`swiftc`, без Xcode-проєкту) і Electron | Electron | Electron |
-| Інші варіанти GUI | — | Python + GTK4 / Qt (PySide6), Tauri | C# WPF / WinUI 3, Tauri |
+| Реалізовано | Electron | Electron | Electron |
+| Інші варіанти GUI | SwiftUI | Python + GTK4 / Qt (PySide6), Tauri | C# WPF / WinUI 3, Tauri |
 | Де шукати команди | `/usr/bin`, `/opt/homebrew/bin`, `/usr/local/bin` | `/usr/bin`, `/usr/local/bin` | `%SystemRoot%\System32\OpenSSH`, далі `PATH` |
 | Встановлення бракуючого | `brew install openssh`; немає brew → Термінал з інсталятором з brew.sh | `apt-get install -y openssh-client` / `dnf install -y openssh-clients` / `pacman -S --noconfirm openssh` / `zypper install openssh-clients` — через `pkexec` (графічний запит пароля); немає `pkexec` → підказати команду з `sudo` і зупинитись | `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0` з підвищенням прав (UAC, `Start-Process -Verb RunAs`), або `winget install Microsoft.OpenSSH.Beta` |
 | `ssh-copy-id` | є | є (у пакеті клієнта) | **немає** → відтворити вручну: `type <ключ>.pub \| ssh -p <порт> <user>@<хост> "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"`. Для Windows-сервера — інший шлях: `administrators_authorized_keys` для адміністраторів |
@@ -154,7 +146,7 @@
 | Агент і пароль ключа | `ssh-add --apple-use-keychain`; `UseKeychain yes` у конфігу | `ssh-add`; без `UseKeychain` | служба `ssh-agent` (за потреби `Set-Service ssh-agent -StartupType Automatic` з правами адміністратора), `ssh-add`; без `UseKeychain` |
 | Шляхи | `~/.ssh` | `~/.ssh` | `%USERPROFILE%\.ssh`, у конфігу `IdentityFile ~/.ssh/...` теж працює |
 | Права файлів | chmod | chmod | `ssh-keygen` ставить ACL сам; на `config` не має бути прав для інших користувачів (`icacls`) |
-| Пакування | `.app` + `.icns` з `icon.png` (`sips` + `iconutil`), ad-hoc `codesign` | `.desktop`-файл + `icon.png`, AppImage або просто скрипт | `.exe` з `.ico` (з `icon.png`), за бажання MSIX |
+| Пакування | `.app` (напр. electron-builder) з `.icns` з `icon.png` (`sips` + `iconutil`), ad-hoc `codesign` | `.desktop`-файл + `icon.png`, AppImage або просто скрипт | `.exe` з `.ico` (з `icon.png`), за бажання MSIX |
 
 ## Electron-версія (`electron/`)
 

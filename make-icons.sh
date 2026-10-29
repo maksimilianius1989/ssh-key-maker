@@ -1,10 +1,9 @@
 #!/bin/sh
 # Робить з icon.png іконки для всіх платформ у теку icons/:
-#   icons/AppIcon.icns                              — macOS
 #   icons/icon.ico                                  — Windows (16…256, PNG усередині)
-#   icons/hicolor/<N>x<N>/apps/ssh-key-maker.png    — Linux (тема hicolor)
+#   icons/hicolor/<N>x<N>/apps/ssh-key-maker.png    — Linux (тема hicolor); 512 — вікно Electron
 #   icons/ssh-key-maker.desktop                     — Linux, ярлик меню
-# Потрібні sips, iconutil (є в macOS) і python3.
+# Потрібні sips (є в macOS) і python3.
 set -e
 cd "$(dirname "$0")"
 OUT=icons
@@ -15,16 +14,7 @@ mkdir -p "$OUT"
 
 png() { sips -z "$1" "$1" icon.png --out "$2" >/dev/null; }
 
-# macOS
-ICONSET="$TMP/AppIcon.iconset"
-mkdir -p "$ICONSET"
-for s in 16 32 128 256 512; do
-  png $s "$ICONSET/icon_${s}x${s}.png"
-  png $((s*2)) "$ICONSET/icon_${s}x${s}@2x.png"
-done
-iconutil -c icns "$ICONSET" -o "$OUT/AppIcon.icns"
-
-# Linux
+# Linux і вікно Electron
 for s in 16 24 32 48 64 128 256 512; do
   mkdir -p "$OUT/hicolor/${s}x${s}/apps"
   png $s "$OUT/hicolor/${s}x${s}/apps/ssh-key-maker.png"

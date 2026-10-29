@@ -1,29 +1,18 @@
-# SSH Key Maker. Список команд: make help
+# SSH Key Maker (Electron). Список команд: make help
 
-APP := SSH Key Maker.app
+.PHONY: all help start icons clean
 
-.PHONY: all help build install icons run start clean
-
-all: build
+all: start
 
 help: ## показати цей список
 	@echo "Команди:"
 	@grep -E '^[a-z]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-9s %s\n", $$1, $$2}'
 
-build: ## зібрати SSH Key Maker.app (те саме, що просто make)
-	./build.sh
-
-install: ## зібрати й встановити в /Applications (або ~/Applications)
-	./build.sh --install
-
-icons: ## лише перегенерувати іконки (icons/)
-	./make-icons.sh
-
-run: build ## зібрати й запустити
-	open "$(APP)"
-
-start: ## Electron-версія: за згодою встановити Node.js та Electron і запустити
+start: ## за згодою встановити Node.js та Electron і запустити (те саме, що просто make)
 	./start.sh
 
-clean: ## прибрати зібране (.app та icons/)
-	rm -rf "$(APP)" icons
+icons: ## перегенерувати іконки (icons/) з icon.png
+	./make-icons.sh
+
+clean: ## прибрати встановлений Electron (electron/node_modules)
+	rm -rf electron/node_modules
