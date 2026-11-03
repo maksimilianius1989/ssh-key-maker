@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('sshkm', {
   openRepo: () => ipcRenderer.invoke('openRepo'),
   onLog: fn => ipcRenderer.on('log', (_e, line) => fn(line)),
   onKey: fn => ipcRenderer.on('key', (_e, data) => fn(data)),
+  onStep: fn => ipcRenderer.on('step', (_e, id) => fn(id)),
 })

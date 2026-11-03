@@ -76,7 +76,7 @@ function requiredTools(mode) {
 function resolveTools(mode) {
   if (!requiredTools(mode).every(n => findTool(n))) return null
   const f = n => findTool(n) || ''
-  return { keygen: f('ssh-keygen'), copyId: f('ssh-copy-id'), ssh: f('ssh'), add: f('ssh-add') }
+  return { keygen: f('ssh-keygen'), copyId: f('ssh-copy-id'), ssh: f('ssh'), add: f('ssh-add'), keyscan: f('ssh-keyscan') }
 }
 
 /** Тимчасовий скрипт SSH_ASKPASS: віддає секрет зі змінної оточення, сам секрету не містить. */
@@ -184,6 +184,65 @@ function reportInstall(r, say) {
   return true
 }
 
+// MARK: - Змінений відбиток сервера
+
+/**
+ * Якщо ssh відмовив через змінений відбиток сервера — показує старий і новий відбитки й за згодою
+ * замінює запис у known_hosts. Новий ключ сервера береться через ssh-keyscan і записується, лише якщо
+ * його відбиток збігається з тим, що показано людині. Повертає true, якщо можна пробувати ще раз.
+ */
+async function acceptChangedHostKey(output, tools, host, port, say) {
+  if (!/REMOTE HOST IDENTIFICATION HAS CHANGED/.test(output)) return false
+  const m = output.match(/fingerprint for the (\S+) key sent by the remote host is\s*(?:ERROR:\s*)?(SHA256:[A-Za-z0-9+/=]+)/)
+  if (!m || !tools.keyscan) {
+    say('✗ Відбиток сервера змінився, а прийняти новий автоматично не вдається.')
+    return false
+  }
+  const [, type, newFp] = m
+  const spec = port === '22' ? host : `[${host}]:${port}`
+  const known = await run(tools.keygen, ['-lF', spec])
+  const oldFps = [...new Set(known.output.match(/SHA256:[A-Za-z0-9+/=]+/g) || [])]
+
+  const accept = await dialog.showMessageBox(win, {
+    type: 'warning',
+    message: 'Відбиток сервера змінився',
+    detail: `Сервер ${spec} надіслав не той відбиток, що запам'ятовано раніше. Так буває, коли сервер ` +
+      'перевстановили або змінили йому ключ. Але це може бути й перехоплення з\'єднання — приймайте новий ' +
+      'відбиток, лише якщо впевнені (наприклад, звірили з адміністратором).\n\n' +
+      `Було: ${oldFps.join(', ') || 'невідомо'}\nЗараз (${type}): ${newFp}`,
+    buttons: ['Сервер змінено — прийняти новий', 'Скасувати'],
+    defaultId: 1,
+    cancelId: 1,
+  })
+  if (accept.response !== 0) {
+    say('✗ Новий відбиток сервера не прийнято.')
+    return false
+  }
+
+  say(`→ Отримую ключ сервера ${spec}…`)
+  const scan = await run(tools.keyscan, ['-p', port, '-T', '15', '-t', type.toLowerCase(), host])
+  let line = null
+  for (const l of scan.output.split(/\r?\n/).filter(l => l && !l.startsWith('#'))) {
+    const fp = await run(tools.keygen, ['-lf', '-'], { input: l + '\n' })
+    if (fp.code === 0 && fp.output.split(/\s+/)[1] === newFp) { line = l; break }
+  }
+  if (!line) {
+    say(`✗ Сервер віддав ключ з іншим відбитком, ніж ${newFp}. Нічого не змінюю.`)
+    return false
+  }
+  // ssh-keygen -R сам лишає копію known_hosts.old
+  const rm = await run(tools.keygen, ['-R', spec])
+  if (rm.code !== 0) { say(`✗ ssh-keygen -R:\n${rm.output.trim()}`); return false }
+  try {
+    fs.appendFileSync(path.join(SSH_DIR, 'known_hosts'), line + '\n', { mode: 0o600 })
+  } catch (e) {
+    say(`✗ Не вдалося записати known_hosts: ${e.message}`)
+    return false
+  }
+  say(`✓ Новий відбиток сервера прийнято (${newFp}). Стару копію — у known_hosts.old.`)
+  return true
+}
+
 // MARK: - Алгоритм
 
 function validate(f) {
@@ -199,12 +258,81 @@ function validate(f) {
 
 const keyDirFor = mode => (mode === 'files' ? PROJECT_KEYS_DIR : SSH_DIR)
 
-async function generate(f, say, showKey) {
+/** Рядок `Host`, серед шаблонів якого точно є name. */
+function isHostLine(line, name) {
+  const parts = line.trim().split(/[ \t]+/)
+  return parts[0].toLowerCase() === 'host' && parts.slice(1).includes(name)
+}
+
+/** Що ssh насправді візьме для name (`ssh -G`): хост, порт, користувач, ключі абсолютними шляхами; null — не спрацював. */
+async function hostSettings(ssh, name) {
+  const g = await run(ssh, ['-G', name])
+  if (g.code !== 0) return null
+  const r = { hostname: '', port: '', user: '', ids: [] }
+  for (const l of g.output.split(/\r?\n/)) {
+    const m = l.match(/^(\S+) (.*)$/)
+    if (!m) continue
+    const k = m[1].toLowerCase(), v = m[2].trim()
+    if (k === 'identityfile') r.ids.push(path.resolve(v.replace(/^~(?=$|[\\/])/, os.homedir())))
+    else if (k in r) r[k] = v
+  }
+  return r
+}
+
+/** Поля запису Host name, які треба змінити, щоб він відповідав формі (порожньо — нічого). */
+function hostChanges(cur, { host, port, user }, key, name) {
+  const c = {}
+  if (cur.hostname.toLowerCase() !== host.toLowerCase()) c.HostName = [cur.hostname, host]
+  if (cur.port !== String(Number(port))) c.Port = [cur.port, port]
+  if (cur.user !== user) c.User = [cur.user, user]
+  if (!cur.ids.includes(path.resolve(key))) c.IdentityFile = [cur.ids.join(', '), `~/.ssh/id_ed25519_${name}`]
+  return c
+}
+
+/**
+ * Правка першого запису Host name на місці: кожне поле з fields — один рядок замість наявних
+ * (там, де стояв перший; немає — одразу після Host), решта рядків як були. null — запису в тексті немає.
+ */
+function updateHostBlock(text, name, fields) {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const start = lines.findIndex(l => isHostLine(l, name))
+  if (start < 0) return null
+  let end = lines.findIndex((l, i) => i > start && /^\s*(host|match)\b/i.test(l))
+  if (end < 0) end = lines.length
+  let body = lines.slice(start + 1, end)
+  const indent = (body.find(l => /^\s+\S/.test(l)) || '').match(/^\s*/)[0] || '    '
+  let added = 0
+  for (const [k, v] of Object.entries(fields)) {
+    const re = new RegExp(`^\\s*${k}(\\s|=)`, 'i')
+    const first = body.findIndex(l => re.test(l))
+    body = body.filter(l => !re.test(l))
+    body.splice(first >= 0 ? first : added++, 0, `${indent}${k} ${v}`)
+  }
+  return [...lines.slice(0, start + 1), ...body, ...lines.slice(end)].join(eol)
+}
+
+/** Якщо оновлення зірвалось до заливання на сервер — новий ключ ніде не використано, повертаємо старий. */
+async function generate(f, say, showKey, step) {
+  const state = { rollback: null }
+  let ok = false
+  try {
+    ok = await generateSteps(f, say, showKey, step, state)
+  } finally {
+    if (!ok && state.rollback) state.rollback()
+  }
+  return ok
+}
+
+/** step(id) — у вікні починається блок кроку: check, tools, key, config, upload, test, cleanup. */
+async function generateSteps(f, say, showKey, step, state) {
+  step('check')
   f = { ...f, name: f.name.trim(), host: f.host.trim(), user: f.user.trim(), port: f.port.trim() }
   const err = validate(f)
   if (err) { say(`✗ ${err}`); return false }
 
   // 1. Залежності
+  step('tools')
   let tools = resolveTools(f.mode)
   if (!tools) {
     const missing = requiredTools(f.mode).filter(n => !findTool(n))
@@ -221,6 +349,7 @@ async function generate(f, say, showKey) {
   const config = path.join(SSH_DIR, 'config')
 
   // 2. Тека ключів
+  step('key')
   try {
     if (!fs.existsSync(keyDir)) fs.mkdirSync(keyDir, { recursive: true, mode: 0o700 })
     // Тека keys у проєкті: щоб приватні ключі не потрапили в git
@@ -231,20 +360,50 @@ async function generate(f, say, showKey) {
     return false
   }
 
-  // 3. Нічого не перезаписуємо
-  if (fs.existsSync(key) || fs.existsSync(pub)) {
-    say(`✗ Ключ ${key} уже існує. Оберіть іншу назву — наявний ключ не перезаписую.`)
-    return false
-  }
+  // 3. Наявний ключ чи запис Host — оновлюємо лише за згодою; старий ключ лишається резервною копією
+  const keyTaken = fs.existsSync(key) || fs.existsSync(pub)
   let existing = ''
   try { existing = fs.readFileSync(config, 'utf8') } catch {}
-  const hostTaken = existing.split(/\r?\n/).some(line => {
-    const parts = line.trim().split(/[ \t]+/)
-    return parts[0].toLowerCase() === 'host' && parts.slice(1).includes(name)
-  })
-  if (mode === 'full' && hostTaken) {
-    say(`✗ У ~/.ssh/config уже є запис Host ${name}. Оберіть іншу назву.`)
-    return false
+  const hostTaken = mode === 'full' && existing.split(/\r?\n/).some(line => isHostLine(line, name))
+  // Наявний Host лишається на своєму місці; змінюємо (крок 5) лише поля, що не збігаються з формою
+  let changes = {}
+  if (hostTaken) {
+    const cur = await hostSettings(tools.ssh, name)
+    if (!cur) { say(`✗ ssh -G ${name} не зміг прочитати ~/.ssh/config — перевірте його.`); return false }
+    changes = hostChanges(cur, f, key, name)
+  }
+  const changeList = Object.entries(changes).map(([k, [a, b]]) => `${k}: ${a || '—'} → ${b}`)
+  let oldPubText = ''
+  if (keyTaken || hostTaken) {
+    const found = [keyTaken && `ключ ${key}`, hostTaken && `запис Host ${name} у ~/.ssh/config`].filter(Boolean)
+    const detail = `Уже є ${found.join(' і ')}. Створити новий ключ замість старого?` +
+      (keyTaken ? ' Старий ключ буде збережено як резервну копію' + (mode === 'full' ? ' і прибрано з сервера.' : '.') : '') +
+      (changeList.length ? `\n\nУ записі Host (на тому ж місці, з резервною копією конфігу) буде змінено:\n${changeList.join('\n')}`
+        : hostTaken ? ' Запис Host уже відповідає формі й не змінюється.' : '')
+    if (!await ask('Оновити ключ?', detail, 'Оновити')) {
+      say('✗ Скасовано — наявний ключ не змінено.')
+      return false
+    }
+    if (keyTaken) {
+      try { oldPubText = fs.readFileSync(pub, 'utf8').trim() } catch {}
+      const stamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z').replace(/:/g, '-')
+      try {
+        for (const f of [key, pub]) if (fs.existsSync(f)) fs.renameSync(f, `${f}.bak-${stamp}`)
+      } catch (e) {
+        say(`✗ Не вдалося відкласти старий ключ: ${e.message}`)
+        return false
+      }
+      say(`✓ Старий ключ збережено як ${key}.bak-${stamp}`)
+      state.rollback = () => {
+        try {
+          for (const f of [key, pub]) fs.rmSync(f, { force: true })
+          for (const f of [key, pub]) if (fs.existsSync(`${f}.bak-${stamp}`)) fs.renameSync(`${f}.bak-${stamp}`, f)
+          say(`⚠︎ Старий ключ повернуто на місце: ${key}`)
+        } catch (e) {
+          say(`⚠︎ Не вдалося повернути старий ключ (${e.message}). Він лежить у ${key}.bak-${stamp}`)
+        }
+      }
+    }
   }
 
   // 4. Ключ
@@ -261,14 +420,18 @@ async function generate(f, say, showKey) {
     return true
   }
 
-  // 5. Запис у кінець config (з резервною копією)
-  try {
-    if (fs.existsSync(config)) {
-      const stamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z').replace(/:/g, '-')
-      const backup = path.join(SSH_DIR, `config.bak-${stamp}`)
-      fs.copyFileSync(config, backup, fs.constants.COPYFILE_EXCL)
-      say(`✓ Резервна копія конфігу: ${backup}`)
+  step('config')
+  // 5. Конфіг (з резервною копією): новий запис — у кінець; наявний правимо на місці, лише поля, що відрізняються
+  let updated = null
+  if (changeList.length) {
+    updated = updateHostBlock(existing, name, Object.fromEntries(Object.entries(changes).map(([k, [, v]]) => [k, v])))
+    if (updated === null) {
+      say(`✗ Запис Host ${name} не в самому ~/.ssh/config (мабуть, в Include) — виправте його вручну:\n  ${changeList.join('\n  ')}`)
+      return false
     }
+  } else if (hostTaken) {
+    say(`✓ Запис Host ${name} уже є в ~/.ssh/config і відповідає формі — конфіг не змінюю.`)
+  } else {
     let block = existing === '' || existing.endsWith('\n') ? '' : '\n'
     if (existing !== '') block += '\n'
     const lines = [
@@ -278,12 +441,19 @@ async function generate(f, say, showKey) {
       `    User ${user}`,
       `    IdentityFile ~/.ssh/id_ed25519_${name}`,
       '    IdentitiesOnly yes',
-      '    AddKeysToAgent yes',
     ]
     // UseKeychain — лише macOS; IgnoreUnknown рятує ssh, зібраний не Apple
     if (IS_MAC) lines.push('    IgnoreUnknown UseKeychain', '    UseKeychain yes')
-    block += lines.join('\n') + '\n'
-    fs.writeFileSync(config, existing + block, { mode: 0o600 })
+    updated = existing + block + lines.join('\n') + '\n'
+  }
+  if (updated !== null) try {
+    if (fs.existsSync(config)) {
+      const stamp = new Date().toISOString().replace(/\.\d+Z$/, 'Z').replace(/:/g, '-')
+      const backup = path.join(SSH_DIR, `config.bak-${stamp}`)
+      fs.copyFileSync(config, backup, fs.constants.COPYFILE_EXCL)
+      say(`✓ Резервна копія конфігу: ${backup}`)
+    }
+    fs.writeFileSync(config, updated, { mode: 0o600 })
     if (IS_WIN) {
       const icacls = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe')
       const r = await run(icacls, [config, '/inheritance:r', '/grant:r', `${os.userInfo().username}:F`])
@@ -291,12 +461,23 @@ async function generate(f, say, showKey) {
     } else {
       fs.chmodSync(config, 0o600)
     }
-    say(`✓ Додано Host ${name} у кінець ~/.ssh/config.`)
+    say(changeList.length ? `✓ У записі Host ${name} змінено:\n  ${changeList.join('\n  ')}`
+      : `✓ Додано Host ${name} у кінець ~/.ssh/config.`)
   } catch (e) {
     say(`✗ Не вдалося записати config: ${e.message}`)
     return false
   }
+  if (changeList.length) {
+    const cur = await hostSettings(tools.ssh, name)
+    const left = cur ? Object.keys(hostChanges(cur, f, key, name)) : ['усе']
+    if (left.length) {
+      say(`✗ Після правки ssh -G ${name} усе одно не збігається з формою (${left.join(', ')}) — ` +
+        'мабуть, ці поля задає запис вище в ~/.ssh/config. Перевірте його.')
+      return false
+    }
+  }
 
+  step('upload')
   let askpass
   try { askpass = makeAskpass() } catch (e) {
     say(`✗ Не вдалося підготувати askpass: ${e.message}`)
@@ -320,36 +501,66 @@ async function generate(f, say, showKey) {
     const opts = ['-o', 'StrictHostKeyChecking=accept-new', '-o', 'ConnectTimeout=15',
       '-o', 'PreferredAuthentications=publickey,password,keyboard-interactive', '-o', 'NumberOfPasswordPrompts=1']
     const copyEnv = { ...askEnv, SSHKM_SECRET: serverPassword }
-    let copy
-    if (IS_WIN) {
-      // ssh-copy-id немає: ключ іде через stdin у authorized_keys (сервер — Unix)
-      const remote = 'umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
-      copy = await run(tools.ssh, ['-p', port, ...opts, `${user}@${host}`, remote], { env: copyEnv, input: pubText + '\n' })
-    } else {
+    const upload = () => {
+      if (IS_WIN) {
+        // ssh-copy-id немає: ключ іде через stdin у authorized_keys (сервер — Unix)
+        const remote = 'umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
+        return run(tools.ssh, ['-p', port, ...opts, `${user}@${host}`, remote], { env: copyEnv, input: pubText + '\n' })
+      }
       // ssh-copy-id — shell-скрипт, що кличе ssh з PATH: підкладаємо теку обраного ssh першою
       copyEnv.PATH = `${path.dirname(tools.ssh)}:/usr/bin:/bin:/usr/sbin:/sbin`
-      copy = await run(tools.copyId, ['-i', pub, '-p', port, ...opts, `${user}@${host}`], { env: copyEnv })
+      return run(tools.copyId, ['-i', pub, '-p', port, ...opts, `${user}@${host}`], { env: copyEnv })
     }
+    let copy = await upload()
     if (copy.output.trim()) say(copy.output.trim())
+    // Відбиток сервера змінився — за згодою запам'ятати новий і спробувати ще раз
+    if (copy.code !== 0 && await acceptChangedHostKey(copy.output, tools, host, port, say)) {
+      say(`→ Заливаю ключ на ${user}@${host}:${port} ще раз…`)
+      copy = await upload()
+      if (copy.output.trim()) say(copy.output.trim())
+    }
     if (copy.code !== 0) {
       say(`✗ ${IS_WIN ? 'Заливання' : 'ssh-copy-id'} завершилось з кодом ${copy.code}.`)
       return false
     }
     say('✓ Ключ на сервері.')
+    // Новий ключ уже на сервері — далі старий не повертаємо, навіть якщо перевірка не пройде
+    state.rollback = null
   } finally {
     try { fs.rmSync(askpass, { force: true }) } catch {}
   }
 
+  step('test')
   // 8. Перевірка: вхід лише за ключем, через новий запис конфігу
   say(`→ Перевіряю вхід: ssh ${name}…`)
   const test = await run(tools.ssh, ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
     '-o', 'StrictHostKeyChecking=accept-new', name, 'echo SSHKM_OK'])
-  if (test.code === 0 && test.output.includes('SSHKM_OK')) {
-    say(`✓ Вхід за ключем працює. Далі: ssh ${name}`)
-    return true
+  if (!(test.code === 0 && test.output.includes('SSHKM_OK'))) {
+    say(`✗ Вхід за ключем не вдався:\n${test.output}`)
+    return false
   }
-  say(`✗ Вхід за ключем не вдався:\n${test.output}`)
-  return false
+  say('✓ Вхід за ключем працює.')
+
+  // 9. Старий ключ — геть із authorized_keys, уже входячи новим (так доступ не губиться)
+  if (keyTaken) {
+    step('cleanup')
+    const blob = oldPubText.split(/\s+/).slice(0, 2).join(' ')
+    if (!/^\S+ \S+$/.test(blob) || blob === pubText.split(/\s+/).slice(0, 2).join(' ')) {
+      say('⚠︎ Старого публічного ключа немає — приберіть його з ~/.ssh/authorized_keys на сервері вручну.')
+    } else {
+      say('→ Прибираю старий ключ із сервера…')
+      // Ключ — у stdin; порожній рядок відкидаємо, бо grep -vF "" стер би весь файл
+      const remote = 'k=$(cat); f=~/.ssh/authorized_keys; [ -n "$k" ] || exit 1; [ -f "$f" ] || exit 0; ' +
+        '{ grep -vF -- "$k" "$f" || true; } > "$f.sshkm" && cat "$f.sshkm" > "$f" && rm -f "$f.sshkm"'
+      const rm = await run(tools.ssh, ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
+        '-o', 'StrictHostKeyChecking=accept-new', name, remote], { input: blob + '\n' })
+      if (rm.code === 0) say('✓ Старий ключ прибрано з сервера.')
+      else say(`⚠︎ Не вдалося прибрати старий ключ із сервера:\n${rm.output.trim()}`)
+    }
+  }
+
+  say(`✓ Готово. Далі: ssh ${name}`)
+  return true
 }
 
 // MARK: - Вікно
@@ -358,7 +569,8 @@ ipcMain.handle('paths', () => ({ sshDir: SSH_DIR, keysDir: PROJECT_KEYS_DIR, pla
 ipcMain.handle('generate', (e, form) =>
   generate(form,
     line => e.sender.send('log', line),
-    (key, keyPath) => e.sender.send('key', { key, keyPath })))
+    (key, keyPath) => e.sender.send('key', { key, keyPath }),
+    id => e.sender.send('step', id)))
 ipcMain.handle('reveal', (_e, p) => shell.showItemInFolder(p))
 ipcMain.handle('copy', (_e, text) => clipboard.writeText(text))
 // Лише адреса репозиторію з головного процесу — довільних URL вікно відкрити не може
@@ -369,9 +581,10 @@ app.whenReady().then(() => {
   win = new BrowserWindow({
     title: 'SSH Key Maker',
     width: 620,
-    height: 780,
+    height: 860,
     minWidth: 560,
-    minHeight: 720,
+    minHeight: 760,
+    backgroundColor: '#080b17',
     icon: fs.existsSync(ICON) ? ICON : undefined,
     autoHideMenuBar: true,
     webPreferences: {
